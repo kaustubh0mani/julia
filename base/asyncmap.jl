@@ -3,23 +3,23 @@
 using Base.Iterators.Enumerate
 
 """
-    asyncmap(f, c...; ntasks=0, batch_size=nothing) -> collection
+    asyncmap(f, c...; ntasks=0, batch_size=nothing)
 
 Uses multiple concurrent tasks to map `f` over a collection (or multiple
 equal length collections). For multiple collection arguments, `f` is
 applied elementwise.
 
 `ntasks` specifies the number of tasks to run concurrently.
-If unspecified, upto a 100 tasks will be started to process the collection
-(depends on its length).
+Depending on the length of the collections, if `ntasks` is unspecified,
+upto a 100 tasks will be used for concurrent mapping.
 
 `ntasks` can also be specified as a zero-arg function. In this case, the
-number of tasks to start is checked before processing every element and a new
+number of tasks to run in parallel is checked before processing every element and a new
 task started if the value of `ntasks_func()` is less than the current number
 of tasks.
 
 If `batch_size` is specified, the collection is processed in batch mode. `f` should
-then be a function that should accept a `Vector{Any}` of argument tuples and should
+then be a function that should accept a `Vector` of argument tuples and should
 return a vector of results. The input vector will have a length upto `batch_size`
 
 The following examples return the `object_id` of the tasks in which the mapping
@@ -77,8 +77,10 @@ julia> asyncmap(batch_func, 1:5; ntasks=2, batch_size=2)
     worker invocation, etc.
 
 """
-asyncmap(f, c...; ntasks=0, batch_size=nothing) = async_usemap(f, c...; ntasks=ntasks, batch_size=batch_size
-)
+function asyncmap(f, c...; ntasks=0, batch_size=nothing)
+    return async_usemap(f, c...; ntasks=ntasks, batch_size=batch_size)
+end
+
 function async_usemap(f, c...; ntasks=0, batch_size=nothing)
     ntasks = verify_ntasks(c[1], ntasks)
 
@@ -240,21 +242,6 @@ function asyncmap(f, b::BitArray; ntasks=0, batch_size=nothing)
     return b2
 end
 
-"""
-    AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing) -> iterator
-
-Apply `f` to each element of `c` collecting output into results.
-
-Keyword args `ntasks` and `batch_size` have the same behavior as in
-`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
-be a function which operates on an array of argument tuples.
-
-!!! note
-    `next(::AsyncCollector, state) -> (nothing, state)`
-!!! note
-    `for _ in AsyncCollector(f, results, c...) end` is equivalent to
-    `map!(f, results, c...)`.
-"""
 type AsyncCollector
     f
     results
@@ -266,6 +253,22 @@ type AsyncCollector
     AsyncCollector(f, r, en::Enumerate, ntasks, batch_size) = new(f, r, en, ntasks, batch_size, isa(ntasks, Function))
 end
 
+"""
+    AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing) -> iterator
+
+Returns an iterator which spplies `f` to each element of `c` and
+collects output into results.
+
+Keyword args `ntasks` and `batch_size` have the same behavior as in
+`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+be a function which operates on an array of argument tuples.
+
+!!! note
+    `next(::AsyncCollector, state) -> (nothing, state)`
+!!! note
+    `for _ in AsyncCollector(f, results, c...) end` is equivalent to
+    `map!(f, results, c...)`.
+"""
 function AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing)
     AsyncCollector(f, results, enumerate(zip(c...)), ntasks, batch_size)
 end
@@ -323,7 +326,7 @@ function next(itr::AsyncCollector, state::AsyncCollectorState)
 end
 
 """
-    AsyncGenerator(f, c...; ntasks=0) -> iterator
+    AsyncGenerator(f, c...; ntasks=0, batch_size=nothing) -> iterator
 
 Apply `f` to each element of `c` using at most `ntasks` asynchronous tasks.
 
@@ -381,7 +384,7 @@ size(itr::AsyncGenerator) = size(itr.collector.enumerator)
 length(itr::AsyncGenerator) = length(itr.collector.enumerator)
 
 """
-    asyncmap!(f, c)
+    asyncmap!(f, c; ntasks=0, batch_size=nothing)
 
 In-place version of [`asyncmap()`](:func:`asyncmap`).
 """
@@ -391,7 +394,7 @@ function asyncmap!(f, c; ntasks=0, batch_size=nothing)
 end
 
 """
-    asyncmap!(f, results, c...)
+    asyncmap!(f, results, c...; ntasks=0, batch_size=nothing)
 
 Like [`asyncmap()`](:func:`asyncmap`), but stores output in `results` rather than
 returning a collection.
