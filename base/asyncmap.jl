@@ -77,7 +77,9 @@ julia> asyncmap(batch_func, 1:5; ntasks=2, batch_size=2)
     worker invocation, etc.
 
 """
-function asyncmap(f, c...; ntasks=0, batch_size=nothing)
+asyncmap(f, c...; ntasks=0, batch_size=nothing) = async_usemap(f, c...; ntasks=ntasks, batch_size=batch_size
+)
+function async_usemap(f, c...; ntasks=0, batch_size=nothing)
     ntasks = verify_ntasks(c[1], ntasks)
 
     if isa(batch_size, Number)
@@ -157,8 +159,13 @@ function maptwice(wrapped_f, chnl, worker_tasks, c...)
     # check if there was a genuine problem with asyncrun
     (asyncrun_excp != nothing) && throw(asyncrun_excp)
 
-    # second run, extract values from the Refs and return
-    map(x->x.x, asyncrun)
+    if isa(asyncrun, Ref)
+        # scalar case
+        return asyncrun.x
+    else
+        # second run, extract values from the Refs and return
+        return map(x->x.x, asyncrun)
+    end
 end
 
 function setup_chnl_and_tasks(exec_func, ntasks, batch_size=nothing)
@@ -216,21 +223,36 @@ function start_worker_task!(worker_tasks, exec_func, chnl, batch_size=nothing)
     push!(worker_tasks, t)
 end
 
+# Special handling for some types.
+
+function asyncmap(f, s::AbstractString; ntasks=0, batch_size=nothing)
+    s2=Array(Char, length(s))
+    asyncmap!(f, s2, s)
+    return convert(String, s2)
+end
+
+# map on a single BitArray returns a BitArray of the mapping function is boolean.
+function asyncmap(f, b::BitArray; ntasks=0, batch_size=nothing)
+    b2 = async_usemap(f, b; ntasks=ntasks, batch_size=batch_size)
+    if eltype(b2) == Bool
+        return BitArray(b2)
+    end
+    return b2
+end
 
 """
-    AsyncCollector(f, results, c...; ntasks=0) -> iterator
+    AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing) -> iterator
 
-Apply `f` to each element of `c` using at most `ntasks` asynchronous
-tasks.
+Apply `f` to each element of `c` collecting output into results.
 
-If `ntasks` is unspecified, upto a 100 tasks may be used.
-For multiple collection arguments, apply `f` elementwise.
-Output is collected into `results`.
+Keyword args `ntasks` and `batch_size` have the same behavior as in
+`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+be a function which operates on an array of argument tuples.
 
 !!! note
     `next(::AsyncCollector, state) -> (nothing, state)`
 !!! note
-    `for task in AsyncCollector(f, results, c...) end` is equivalent to
+    `for _ in AsyncCollector(f, results, c...) end` is equivalent to
     `map!(f, results, c...)`.
 """
 type AsyncCollector
@@ -238,13 +260,14 @@ type AsyncCollector
     results
     enumerator::Enumerate
     ntasks
+    batch_size
     nt_check::Bool     # check number of tasks on every iteration
 
-    AsyncCollector(f, r, en::Enumerate, ntasks) = new(f, r, en, ntasks, isa(ntasks, Function))
+    AsyncCollector(f, r, en::Enumerate, ntasks, batch_size) = new(f, r, en, ntasks, batch_size, isa(ntasks, Function))
 end
 
-function AsyncCollector(f, results, c...; ntasks=0)
-    AsyncCollector(f, results, enumerate(zip(c...)), ntasks)
+function AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing)
+    AsyncCollector(f, results, enumerate(zip(c...)), ntasks, batch_size)
 end
 
 type AsyncCollectorState
@@ -255,10 +278,24 @@ end
 
 function start(itr::AsyncCollector)
     itr.ntasks = verify_ntasks(itr.enumerator, itr.ntasks)
-    chnl, worker_tasks = setup_chnl_and_tasks((i,args) -> (itr.results[i]=itr.f(args...)) , itr.ntasks)
+    if isa(itr.batch_size, Number)
+        @assert itr.batch_size >= 0
+        exec_func = batch -> begin
+            # extract indexes from the input tuple
+            batch_idxs = map(x->x[1], batch)
+
+            # and the args tuple....
+            batched_args = map(x->x[2], batch)
+
+            results = f(batched_args)
+            foreach(x -> (itr.results[batch_idxs[x[1]]] = x[2]), enumerate(results))
+        end
+    else
+        exec_func = (i,args) -> (itr.results[i]=itr.f(args...))
+    end
+    chnl, worker_tasks = setup_chnl_and_tasks((i,args) -> (itr.results[i]=itr.f(args...)), itr.ntasks, itr.batch_size)
     return AsyncCollectorState(chnl, worker_tasks, start(itr.enumerator))
 end
-
 
 function done(itr::AsyncCollector, state::AsyncCollectorState)
     if !isopen(state.chnl) || done(itr.enumerator, state.enum_state)
@@ -289,9 +326,10 @@ end
     AsyncGenerator(f, c...; ntasks=0) -> iterator
 
 Apply `f` to each element of `c` using at most `ntasks` asynchronous tasks.
-If `ntasks` is unspecified, upto a 100 tasks may be used.
-For multiple collection arguments, apply `f` elementwise.
-Results are returned by the iterator as they become available.
+
+Keyword args `ntasks` and `batch_size` have the same behavior as in
+`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+be a function which operates on an array of argument tuples.
 
 !!! note
     `collect(AsyncGenerator(f, c...; ntasks=1))` is equivalent to
@@ -347,8 +385,10 @@ length(itr::AsyncGenerator) = length(itr.collector.enumerator)
 
 In-place version of [`asyncmap()`](:func:`asyncmap`).
 """
-asyncmap!(f, c) = (for x in AsyncCollector(f, c, c) end; c)
-
+function asyncmap!(f, c; ntasks=0, batch_size=nothing)
+    foreach(_->_, AsyncCollector(f, c, c; ntasks=ntasks, batch_size=batch_size))
+    c
+end
 
 """
     asyncmap!(f, results, c...)
@@ -356,4 +396,7 @@ asyncmap!(f, c) = (for x in AsyncCollector(f, c, c) end; c)
 Like [`asyncmap()`](:func:`asyncmap`), but stores output in `results` rather than
 returning a collection.
 """
-asyncmap!(f, r, c1, c...) = (for x in AsyncCollector(f, r, c1, c...) end; r)
+function asyncmap!(f, r, c1, c...; ntasks=0, batch_size=nothing)
+    foreach(_->_, AsyncCollector(f, r, c1, c...; ntasks=ntasks, batch_size=batch_size))
+    c
+end

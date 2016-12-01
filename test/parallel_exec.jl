@@ -830,12 +830,33 @@ b=asyncmap(identity, c)
 @test size(b) == (10,)
 
 # check with an iterator that has only implements length()
+# Also the asyncmap on tuples test.
 len_iter = (1,2,3,4,5)
 @test Base.iteratorsize(len_iter) == Base.HasLength()
-@test asyncmap(identity, len_iter) == (1,2,3,4,5)
+@test asyncmap(identity, len_iter) == map(identity, len_iter)
 
-# test with sparse matrices
-@test asyncmap(x->x>0?1.0:0.0, sparse(eye(5))) == sparse(eye(5))
+
+# asyncmap with various types. Test for equivalence with map
+
+function asyncmap_equivalence(f, c...)
+    x1 = asyncmap(f,c...)
+    x2 = map(f,c...)
+
+    @test size(x1) == size(x2)
+    @test eltype(x1) == eltype(x2)
+    for (v1,v2) in zip(x1,x2)
+        @test v1==v2
+    end
+end
+
+asyncmap_equivalence(x->x>0?1.0:0.0, sparse(eye(5)))
+asyncmap_equivalence((x,y,z)->x+y+z, 1,2,3)
+asyncmap_equivalence(x->x?false:true, BitArray(10,10))
+asyncmap_equivalence(x->"foobar", BitArray(10,10))
+asyncmap_equivalence((x,y,z)->string(x,y,z), BitArray(10), ones(10), "1234567890")
+
+@test asyncmap(uppercase, "Hello World!") == map(uppercase, "Hello World!")
+
 
 # Test that the default worker pool cycles through all workers
 pmap(_->myid(), 1:nworkers())  # priming run
