@@ -700,6 +700,22 @@ Types
        julia> f(apple)
        "I'm a FRUIT with value: 1"
 
+.. function:: @flagenum FlagEnum[::U] EnumValue1[=x] EnumValue2[=y]
+
+   .. Docstring generated from Julia source
+
+   Create an :obj:`FlagEnum` type with name ``EnumName`` and base member values of ``EnumValue1`` and ``EnumValue2``\ , based on the unsigned integer type ``U`` (``UInt32`` by default). If the values ``x`` and ``y`` are provided, they must each have a single bit on, and naturally, not coincide. The ``EnumName`` type can be used just like other types, and enum member values as regular values, such as
+
+   .. doctest::
+
+       julia> @flagenum FRUITFLAGS apple=1<<0 orange=1<<1 kiwi=1<<2
+
+       julia> f(x::FRUITFLAGS) = "I'm a FRUITFLAGS with value: $(Int(x))"
+       f (generic function with 1 method)
+
+       julia> f(apple|kiwi)
+       "I'm a FRUITFLAGS with value: 5"
+
 .. function:: instances(T::Type)
 
    .. Docstring generated from Julia source
