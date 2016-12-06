@@ -816,7 +816,6 @@ resp = asyncmap(x->(v=next_ctr(); map(_->v, x)), 1:22; ntasks=5, batch_size=5)
 input = rand(1:1000, 100)
 @test asyncmap(x->map(args->identity(args...), x), input; ntasks=5, batch_size=5) == input
 
-
 # check whether shape is retained
 a=rand(2,2)
 b=asyncmap(identity, a)
@@ -830,32 +829,49 @@ b=asyncmap(identity, c)
 @test size(b) == (10,)
 
 # check with an iterator that has only implements length()
-# Also the asyncmap on tuples test.
-len_iter = (1,2,3,4,5)
-@test Base.iteratorsize(len_iter) == Base.HasLength()
-@test asyncmap(identity, len_iter) == map(identity, len_iter)
+len_only_iterable = (1,2,3,4,5)
+@test Base.iteratorsize(len_only_iterable) == Base.HasLength()
+@test asyncmap(identity, len_only_iterable) == map(identity, len_only_iterable)
 
+# Error conditions
+@test_throws AssertionError asyncmap(identity, 1:10; batch_size=0)
+@test_throws AssertionError asyncmap(identity, 1:10; batch_size="10")
+@test_throws AssertionError asyncmap(identity, 1:10; ntasks="10")
 
-# asyncmap with various types. Test for equivalence with map
-
-function asyncmap_equivalence(f, c...)
+# asyncmap and pmap with various types. Test for equivalence with map
+function testmap_equivalence(f, c...)
     x1 = asyncmap(f,c...)
-    x2 = map(f,c...)
+    x2 = pmap(f,c...)
+    x3 = map(f,c...)
 
-    @test size(x1) == size(x2)
-    @test eltype(x1) == eltype(x2)
-    for (v1,v2) in zip(x1,x2)
+    if Base.iteratorsize == Base.HasShape()
+        @test size(x1) == size(x3)
+        @test size(x2) == size(x3)
+    else
+        @test length(x1) == length(x3)
+        @test length(x2) == length(x3)
+    end
+
+    @test eltype(x1) == eltype(x3)
+    @test eltype(x2) == eltype(x3)
+
+    for (v1,v2) in zip(x1,x3)
+        @test v1==v2
+    end
+    for (v1,v2) in zip(x2,x3)
         @test v1==v2
     end
 end
 
-asyncmap_equivalence(x->x>0?1.0:0.0, sparse(eye(5)))
-asyncmap_equivalence((x,y,z)->x+y+z, 1,2,3)
-asyncmap_equivalence(x->x?false:true, BitArray(10,10))
-asyncmap_equivalence(x->"foobar", BitArray(10,10))
-asyncmap_equivalence((x,y,z)->string(x,y,z), BitArray(10), ones(10), "1234567890")
+testmap_equivalence(identity, (1,2,3,4))
+testmap_equivalence(x->x>0?1.0:0.0, sparse(eye(5)))
+testmap_equivalence((x,y,z)->x+y+z, 1,2,3)
+testmap_equivalence(x->x?false:true, BitArray(10,10))
+testmap_equivalence(x->"foobar", BitArray(10,10))
+testmap_equivalence((x,y,z)->string(x,y,z), BitArray(10), ones(10), "1234567890")
 
 @test asyncmap(uppercase, "Hello World!") == map(uppercase, "Hello World!")
+@test pmap(uppercase, "Hello World!") == map(uppercase, "Hello World!")
 
 
 # Test that the default worker pool cycles through all workers

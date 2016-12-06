@@ -11,21 +11,21 @@ applied elementwise.
 
 `ntasks` specifies the number of tasks to run concurrently.
 Depending on the length of the collections, if `ntasks` is unspecified,
-upto a 100 tasks will be used for concurrent mapping.
+up to a 100 tasks will be used for concurrent mapping.
 
 `ntasks` can also be specified as a zero-arg function. In this case, the
 number of tasks to run in parallel is checked before processing every element and a new
 task started if the value of `ntasks_func()` is less than the current number
 of tasks.
 
-If `batch_size` is specified, the collection is processed in batch mode. `f` should
-then be a function that should accept a `Vector` of argument tuples and should
-return a vector of results. The input vector will have a length upto `batch_size`
+If `batch_size` is specified, the collection is processed in batch mode. `f` must
+then be a function that must accept a `Vector` of argument tuples and must
+return a vector of results. The input vector will have a length of `batch_size` or less.
 
-The following examples return the `object_id` of the tasks in which the mapping
-function is executed for different invocations of `ntasks` and `batch_size`.
+The following examples highlight execution in different tasks by returning
+the `object_id` of the tasks in which the mapping function is executed.
 
-With ntasks undefined, each element is processed in a different task.
+First, with `ntasks` undefined, each element is processed in a different task.
 ```
 julia> tskoid() = object_id(current_task());
 
@@ -41,7 +41,7 @@ julia> length(unique(asyncmap(x->tskoid(), 1:5)))
 5
 ```
 
-With `ntasks=2` all elements are only processed in 2 tasks.
+With `ntasks=2` all elements are processed in 2 tasks.
 ```
 julia> asyncmap(x->tskoid(), 1:5; ntasks=2)
 5-element Array{UInt64,1}:
@@ -56,8 +56,8 @@ julia> length(unique(asyncmap(x->tskoid(), 1:5; ntasks=2)))
 ```
 
 With `batch_size` defined, the mapping function needs to be changed to accept an array
-of argument tuples. And return an array of results. In this example we call `map`
-on the batch input to achieve the same.
+of argument tuples and return an array of results. `map` is used in the modified mapping
+function to achieve this.
 ```
 julia> batch_func(input) = map(x->string("args_tuple: ", x, ", element_val: ", x[1], ", task: ", tskoid()), input)
 batch_func (generic function with 1 method)
@@ -83,9 +83,9 @@ end
 
 function async_usemap(f, c...; ntasks=0, batch_size=nothing)
     ntasks = verify_ntasks(c[1], ntasks)
+    batch_size = verify_batch_size(batch_size)
 
-    if isa(batch_size, Number)
-        @assert batch_size >= 0
+    if batch_size !== nothing
         exec_func = batch -> begin
             # extract the Refs from the input tuple
             batch_refs = map(x->x[1], batch)
@@ -103,7 +103,26 @@ function async_usemap(f, c...; ntasks=0, batch_size=nothing)
     return wrap_n_exec_twice(chnl, worker_tasks, ntasks, exec_func, c...)
 end
 
+batch_size_err_str(batch_size) = string("batch_size must be specified as a positive integer. batch_size=", batch_size)
+function verify_batch_size(batch_size)
+    if batch_size === nothing
+        return batch_size
+    elseif isa(batch_size, Number)
+        batch_size = Int(batch_size)
+        @assert batch_size > 0 batch_size_err_str(batch_size)
+        return batch_size
+    else
+        throw(AssertionError(batch_size_err_str(batch_size)))
+    end
+end
+
+
 function verify_ntasks(iterable, ntasks)
+    if !((isa(ntasks, Number) && (ntasks >= 0)) || isa(ntasks, Function))
+        err = string("ntasks must be specified as a positive integer or a 0-arg function. ntasks=", ntasks)
+        throw(AssertionError(err))
+    end
+
     if ntasks == 0
         chklen = iteratorsize(iterable)
         if (chklen == HasLength()) || (chklen == HasShape())
@@ -112,7 +131,7 @@ function verify_ntasks(iterable, ntasks)
             ntasks = 100
         end
     end
-    ntasks
+    return ntasks
 end
 
 function wrap_n_exec_twice(chnl, worker_tasks, ntasks, exec_func, c...)
@@ -122,7 +141,7 @@ function wrap_n_exec_twice(chnl, worker_tasks, ntasks, exec_func, c...)
 
     if isa(ntasks, Function)
         map_f = (x...) -> begin
-            # check number of tasks everytime, and start one if required.
+            # check number of tasks every time, and start one if required.
             # number_tasks > optimal_number is fine, the other way around is inefficient.
             if length(worker_tasks) < ntasks()
                 start_worker_task!(worker_tasks, exec_func, chnl)
@@ -144,8 +163,8 @@ function maptwice(wrapped_f, chnl, worker_tasks, c...)
     catch ex
         if isa(ex,InvalidStateException)
             # channel could be closed due to exceptions in the async tasks,
-            # we should propagate those errors, if any, over the `put!` failing
-            # in asyncrun.
+            # we propagate those errors, if any, over the `put!` failing
+            # in asyncrun due to a closed channel.
             asyncrun_excp = ex
         else
             rethrow(ex)
@@ -159,14 +178,14 @@ function maptwice(wrapped_f, chnl, worker_tasks, c...)
     foreach(x->(v=wait(x); isa(v, Exception) && throw(v)), worker_tasks)
 
     # check if there was a genuine problem with asyncrun
-    (asyncrun_excp != nothing) && throw(asyncrun_excp)
+    (asyncrun_excp !== nothing) && throw(asyncrun_excp)
 
     if isa(asyncrun, Ref)
         # scalar case
         return asyncrun.x
     else
         # second run, extract values from the Refs and return
-        return map(x->x.x, asyncrun)
+        return map(ref->ref.x, asyncrun)
     end
 end
 
@@ -175,16 +194,16 @@ function setup_chnl_and_tasks(exec_func, ntasks, batch_size=nothing)
         nt = ntasks()
         # start at least one worker task.
         if nt == 0
-            nt=1
+            nt = 1
         end
     else
         nt = ntasks
     end
 
     # Use an unbuffered channel for communicating with the worker tasks. In the event
-    # of any error in any of the worker tasks, the channel is closed. And this
-    # results in the `put!` in the driver task immediately failing.
-    chnl=Channel(0)
+    # of an error in any of the worker tasks, the channel is closed. This
+    # results in the `put!` in the driver task failing immediately.
+    chnl = Channel(0)
     worker_tasks = []
     foreach(_ -> start_worker_task!(worker_tasks, exec_func, chnl, batch_size), 1:nt)
 
@@ -201,7 +220,7 @@ function start_worker_task!(worker_tasks, exec_func, chnl, batch_size=nothing)
                     # The mapping function expects an array of input args, as it processes
                     # elements in a batch.
                     batch_collection=Any[]
-                    n=0
+                    n = 0
                     for exec_data in chnl
                         push!(batch_collection, exec_data)
                         n += 1
@@ -226,20 +245,26 @@ function start_worker_task!(worker_tasks, exec_func, chnl, batch_size=nothing)
 end
 
 # Special handling for some types.
-
-function asyncmap(f, s::AbstractString; ntasks=0, batch_size=nothing)
+function asyncmap(f, s::AbstractString; kwargs...)
     s2=Array(Char, length(s))
-    asyncmap!(f, s2, s)
+    asyncmap!(f, s2, s; kwargs...)
     return convert(String, s2)
 end
 
-# map on a single BitArray returns a BitArray of the mapping function is boolean.
-function asyncmap(f, b::BitArray; ntasks=0, batch_size=nothing)
-    b2 = async_usemap(f, b; ntasks=ntasks, batch_size=batch_size)
+# map on a single BitArray returns a BitArray if the mapping function is boolean.
+function asyncmap(f, b::BitArray; kwargs...)
+    b2 = async_usemap(f, b; kwargs...)
     if eltype(b2) == Bool
         return BitArray(b2)
     end
     return b2
+end
+
+# TODO: Optimize for sparse arrays
+# For now process as regular arrays and convert back
+function asyncmap(f, s::Base.SparseArrays.AbstractSparseArray...; kwargs...)
+    sa = map(Array, s)
+    return sparse(asyncmap(f, sa...; kwargs...))
 end
 
 type AsyncCollector
@@ -256,15 +281,19 @@ end
 """
     AsyncCollector(f, results, c...; ntasks=0, batch_size=nothing) -> iterator
 
-Returns an iterator which spplies `f` to each element of `c` and
-collects output into results.
+Returns an iterator which applies `f` to each element of `c` asynchronously
+and collects output into results.
 
 Keyword args `ntasks` and `batch_size` have the same behavior as in
-`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+`[asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
 be a function which operates on an array of argument tuples.
 
 !!! note
-    `next(::AsyncCollector, state) -> (nothing, state)`
+    `next(::AsyncCollector, state) -> (nothing, state)`. A successful return
+    from `next` indicates that the next element from the input collection is
+    being processed asynchronously. It blocks till a free worker task becomes
+    available.
+
 !!! note
     `for _ in AsyncCollector(f, results, c...) end` is equivalent to
     `map!(f, results, c...)`.
@@ -281,8 +310,8 @@ end
 
 function start(itr::AsyncCollector)
     itr.ntasks = verify_ntasks(itr.enumerator, itr.ntasks)
-    if isa(itr.batch_size, Number)
-        @assert itr.batch_size >= 0
+    itr.batch_size = verify_batch_size(itr.batch_size)
+    if itr.batch_size !== nothing
         exec_func = batch -> begin
             # extract indexes from the input tuple
             batch_idxs = map(x->x[1], batch)
@@ -331,7 +360,7 @@ end
 Apply `f` to each element of `c` using at most `ntasks` asynchronous tasks.
 
 Keyword args `ntasks` and `batch_size` have the same behavior as in
-`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+`[asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
 be a function which operates on an array of argument tuples.
 
 !!! note
@@ -389,7 +418,7 @@ length(itr::AsyncGenerator) = length(itr.collector.enumerator)
 In-place version of [`asyncmap()`](:func:`asyncmap`).
 """
 function asyncmap!(f, c; ntasks=0, batch_size=nothing)
-    foreach(_->_, AsyncCollector(f, c, c; ntasks=ntasks, batch_size=batch_size))
+    foreach(identity, AsyncCollector(f, c, c; ntasks=ntasks, batch_size=batch_size))
     c
 end
 
@@ -400,6 +429,6 @@ Like [`asyncmap()`](:func:`asyncmap`), but stores output in `results` rather tha
 returning a collection.
 """
 function asyncmap!(f, r, c1, c...; ntasks=0, batch_size=nothing)
-    foreach(_->_, AsyncCollector(f, r, c1, c...; ntasks=ntasks, batch_size=batch_size))
+    foreach(identity, AsyncCollector(f, r, c1, c...; ntasks=ntasks, batch_size=batch_size))
     c
 end
