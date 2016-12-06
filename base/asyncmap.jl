@@ -262,7 +262,7 @@ end
 
 # TODO: Optimize for sparse arrays
 # For now process as regular arrays and convert back
-function asyncmap(f, s::Base.SparseArrays.AbstractSparseArray...; kwargs...)
+function asyncmap(f, s::AbstractSparseArray...; kwargs...)
     sa = map(Array, s)
     return sparse(asyncmap(f, sa...; kwargs...))
 end
