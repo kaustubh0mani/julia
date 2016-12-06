@@ -351,15 +351,15 @@ General Parallel Computing Support
 
    Uses multiple concurrent tasks to map ``f`` over a collection (or multiple equal length collections). For multiple collection arguments, ``f`` is applied elementwise.
 
-   ``ntasks`` specifies the number of tasks to run concurrently. Depending on the length of the collections, if ``ntasks`` is unspecified, upto a 100 tasks will be used for concurrent mapping.
+   ``ntasks`` specifies the number of tasks to run concurrently. Depending on the length of the collections, if ``ntasks`` is unspecified, up to a 100 tasks will be used for concurrent mapping.
 
    ``ntasks`` can also be specified as a zero-arg function. In this case, the number of tasks to run in parallel is checked before processing every element and a new task started if the value of ``ntasks_func()`` is less than the current number of tasks.
 
-   If ``batch_size`` is specified, the collection is processed in batch mode. ``f`` should then be a function that should accept a ``Vector`` of argument tuples and should return a vector of results. The input vector will have a length upto ``batch_size``
+   If ``batch_size`` is specified, the collection is processed in batch mode. ``f`` must then be a function that must accept a ``Vector`` of argument tuples and must return a vector of results. The input vector will have a length of ``batch_size`` or less.
 
-   The following examples return the ``object_id`` of the tasks in which the mapping function is executed for different invocations of ``ntasks`` and ``batch_size``\ .
+   The following examples highlight execution in different tasks by returning the ``object_id`` of the tasks in which the mapping function is executed.
 
-   With ntasks undefined, each element is processed in a different task.
+   First, with ``ntasks`` undefined, each element is processed in a different task.
 
    .. code-block:: julia
 
@@ -376,7 +376,7 @@ General Parallel Computing Support
        julia> length(unique(asyncmap(x->tskoid(), 1:5)))
        5
 
-   With ``ntasks=2`` all elements are only processed in 2 tasks.
+   With ``ntasks=2`` all elements are processed in 2 tasks.
 
    .. code-block:: julia
 
@@ -391,7 +391,7 @@ General Parallel Computing Support
        julia> length(unique(asyncmap(x->tskoid(), 1:5; ntasks=2)))
        2
 
-   With ``batch_size`` defined, the mapping function needs to be changed to accept an array of argument tuples. And return an array of results. In this example we call ``map`` on the batch input to achieve the same.
+   With ``batch_size`` defined, the mapping function needs to be changed to accept an array of argument tuples and return an array of results. ``map`` is used in the modified mapping function to achieve this.
 
    .. code-block:: julia
 
