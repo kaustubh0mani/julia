@@ -337,9 +337,9 @@ function done(itr::AsyncCollector, state::AsyncCollectorState)
         foreach(x->(v=wait(x); isa(v, Exception) && throw(v)), state.worker_tasks)
         empty!(state.worker_tasks)
         return true
-     else
+    else
         return false
-     end
+    end
 end
 
 function next(itr::AsyncCollector, state::AsyncCollectorState)
