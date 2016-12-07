@@ -834,9 +834,9 @@ len_only_iterable = (1,2,3,4,5)
 @test asyncmap(identity, len_only_iterable) == map(identity, len_only_iterable)
 
 # Error conditions
-@test_throws AssertionError asyncmap(identity, 1:10; batch_size=0)
-@test_throws AssertionError asyncmap(identity, 1:10; batch_size="10")
-@test_throws AssertionError asyncmap(identity, 1:10; ntasks="10")
+@test_throws ArgumentError asyncmap(identity, 1:10; batch_size=0)
+@test_throws ArgumentError asyncmap(identity, 1:10; batch_size="10")
+@test_throws ArgumentError asyncmap(identity, 1:10; ntasks="10")
 
 # asyncmap and pmap with various types. Test for equivalence with map
 function testmap_equivalence(f, c...)

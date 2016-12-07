@@ -109,10 +109,10 @@ function verify_batch_size(batch_size)
         return batch_size
     elseif isa(batch_size, Number)
         batch_size = Int(batch_size)
-        @assert batch_size > 0 batch_size_err_str(batch_size)
+        batch_size < 1 && throw(ArgumentError(batch_size_err_str(batch_size)))
         return batch_size
     else
-        throw(AssertionError(batch_size_err_str(batch_size)))
+        throw(ArgumentError(batch_size_err_str(batch_size)))
     end
 end
 
@@ -120,7 +120,7 @@ end
 function verify_ntasks(iterable, ntasks)
     if !((isa(ntasks, Number) && (ntasks >= 0)) || isa(ntasks, Function))
         err = string("ntasks must be specified as a positive integer or a 0-arg function. ntasks=", ntasks)
-        throw(AssertionError(err))
+        throw(ArgumentError(err))
     end
 
     if ntasks == 0
@@ -285,7 +285,7 @@ Returns an iterator which applies `f` to each element of `c` asynchronously
 and collects output into results.
 
 Keyword args `ntasks` and `batch_size` have the same behavior as in
-`[asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+[`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
 be a function which operates on an array of argument tuples.
 
 !!! note
@@ -360,7 +360,7 @@ end
 Apply `f` to each element of `c` using at most `ntasks` asynchronous tasks.
 
 Keyword args `ntasks` and `batch_size` have the same behavior as in
-`[asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
+[`asyncmap()`](:func:`asyncmap`). If `batch_size` is specified, `f` must
 be a function which operates on an array of argument tuples.
 
 !!! note
